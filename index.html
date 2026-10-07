@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>foodly</title>
+  <meta name="description" content="家にある食材と買うものを管理して、食材の無駄を減らすアプリ">
+  <meta name="theme-color" content="#FFF9F1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="foodly">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+
+  <header class="appbar">
+    <h1 class="appbar-title"><span class="logo-dot" aria-hidden="true"></span>foodly</h1>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <!-- 買うリスト -->
+    <section id="view-buy" class="view" aria-labelledby="h-buy">
+      <h2 id="h-buy" class="view-title">買うリスト</h2>
+      <div class="add-slot" data-list="buy"></div>
+      <ul id="buy-list" class="list" aria-label="買うリストの食材"></ul>
+      <p id="buy-empty" class="empty" hidden>買うものはありません。上の入力欄から追加できます。</p>
+    </section>
+
+    <!-- 家にある食材 -->
+    <section id="view-home" class="view" aria-labelledby="h-home" hidden>
+      <div class="view-head">
+        <h2 id="h-home" class="view-title">家にある食材</h2>
+        <button type="button" id="recipe-toggle" class="btn btn-secondary btn-small" aria-pressed="false">レシピを考える</button>
+      </div>
+      <p id="recipe-hint" class="hint" hidden>レシピに使いたい食材を選んでください。</p>
+      <div class="add-slot" data-list="home"></div>
+      <div id="home-groups"></div>
+      <p id="home-empty" class="empty" hidden>家にある食材はまだありません。買うリストでチェックを入れるか、上の入力欄から追加できます。</p>
+      <div id="recipe-bar" class="recipe-bar" hidden>
+        <button type="button" id="recipe-make" class="btn btn-primary btn-block" disabled>選んだ食材でプロンプトを作る</button>
+      </div>
+    </section>
+
+    <!-- 設定 -->
+    <section id="view-settings" class="view" aria-labelledby="h-settings" hidden>
+      <h2 id="h-settings" class="view-title">設定</h2>
+
+      <div class="card">
+        <h3 class="card-title">バックアップ</h3>
+        <p>データはこのiPhoneの中にだけ保存されています。機種変更などに備えて、ときどき書き出してiCloud Driveなどに保存してください。</p>
+        <div class="stack">
+          <button type="button" id="backup-export" class="btn btn-primary btn-block">バックアップを書き出す</button>
+          <label class="btn btn-secondary btn-block file-btn">
+            バックアップを読み込む
+            <input type="file" id="backup-import" accept="application/json,.json" class="visually-hidden">
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">ホーム画面のバッジ</h3>
+        <p>期限まで3日以内と期限切れの食材の数を、アプリのアイコンに表示します。数字はアプリを開いたときに更新されます。</p>
+        <p id="badge-status" class="hint"></p>
+        <button type="button" id="badge-enable" class="btn btn-secondary btn-block" hidden>バッジを有効にする</button>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">食材マスタ</h3>
+        <p>食材名を選ぶと、ここにある日数で消費期限を自動で計算します。日数は目安です。</p>
+        <details class="master">
+          <summary>一覧を見る(<span id="master-count"></span>件)</summary>
+          <div class="table-wrap">
+            <table>
+              <caption class="visually-hidden">食材マスタ一覧</caption>
+              <thead><tr><th scope="col">食材</th><th scope="col">保存</th><th scope="col">日数</th><th scope="col">冷凍</th></tr></thead>
+              <tbody id="master-body"></tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+
+      <p class="hint center">foodly v1.0</p>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="画面の切り替え">
+    <button type="button" class="tab" data-view="buy" aria-current="page">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6h15l-1.5 8.5H7.5L6 6zm0 0L5 3H2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="19" r="1.6" fill="currentColor"/><circle cx="18" cy="19" r="1.6" fill="currentColor"/></svg>
+      <span>買う</span>
+      <span class="tab-count" id="tab-count-buy" hidden></span>
+    </button>
+    <button type="button" class="tab" data-view="home">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14M9 6v2M9 13v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>家にある</span>
+      <span class="tab-count tab-count-alert" id="tab-count-home" hidden></span>
+    </button>
+    <button type="button" class="tab" data-view="settings">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>設定</span>
+    </button>
+  </nav>
+
+  <!-- 編集 -->
+  <dialog id="dlg-edit" aria-labelledby="dlg-edit-title">
+    <form method="dialog" id="edit-form" class="dlg">
+      <h2 id="dlg-edit-title" class="dlg-title">食材を編集</h2>
+      <p id="edit-note" class="note" hidden></p>
+      <label class="field">
+        <span class="field-label">名前</span>
+        <input type="text" id="edit-name" required autocomplete="off">
+      </label>
+      <fieldset class="field" id="edit-storage-wrap">
+        <legend class="field-label">保存場所</legend>
+        <div class="segmented">
+          <label><input type="radio" name="edit-storage" value="fridge"><span>冷蔵</span></label>
+          <label><input type="radio" name="edit-storage" value="freezer"><span>冷凍</span></label>
+          <label><input type="radio" name="edit-storage" value="pantry"><span>常温</span></label>
+        </div>
+      </fieldset>
+      <div class="field" id="edit-expiry-wrap">
+        <label class="field-label" for="edit-expiry">消費期限</label>
+        <input type="date" id="edit-expiry">
+        <div class="quick" role="group" aria-label="今日から数えて期限を設定">
+          <button type="button" class="chip" data-days="3">3日</button>
+          <button type="button" class="chip" data-days="7">1週間</button>
+          <button type="button" class="chip" data-days="14">2週間</button>
+          <button type="button" class="chip" data-days="30">1か月</button>
+        </div>
+      </div>
+      <label class="check-field">
+        <input type="checkbox" id="edit-staple">
+        <span>定番(使い切ったら自動で買うリストに戻す)</span>
+      </label>
+      <div class="dlg-actions">
+        <button type="button" class="btn btn-secondary" data-close>キャンセル</button>
+        <button type="submit" class="btn btn-primary" value="save">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 確認 -->
+  <dialog id="dlg-confirm" aria-labelledby="dlg-confirm-title" aria-describedby="dlg-confirm-msg">
+    <div class="dlg">
+      <h2 id="dlg-confirm-title" class="dlg-title"></h2>
+      <p id="dlg-confirm-msg"></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn btn-secondary" id="dlg-confirm-cancel"></button>
+        <button type="button" class="btn btn-primary" id="dlg-confirm-ok"></button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- バーコード -->
+  <dialog id="dlg-scan" aria-labelledby="dlg-scan-title">
+    <div class="dlg">
+      <h2 id="dlg-scan-title" class="dlg-title">バーコードを読み取る</h2>
+      <div id="reader" class="reader"></div>
+      <p id="scan-status" class="hint" role="status" aria-live="polite"></p>
+      <form id="scan-manual" class="manual">
+        <label class="field">
+          <span class="field-label">番号を入力して探す</span>
+          <input type="text" id="scan-code" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
+        </label>
+        <button type="submit" class="btn btn-secondary">探す</button>
+      </form>
+      <div class="dlg-actions">
+        <button type="button" class="btn btn-secondary" data-close>閉じる</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- レシピプロンプト -->
+  <dialog id="dlg-prompt" aria-labelledby="dlg-prompt-title">
+    <div class="dlg">
+      <h2 id="dlg-prompt-title" class="dlg-title">レシピ用のプロンプト</h2>
+      <p>コピーして、ChatGPTやClaudeに貼り付けてください。内容は書き換えられます。</p>
+      <label class="visually-hidden" for="prompt-text">プロンプト</label>
+      <textarea id="prompt-text" rows="12"></textarea>
+      <div class="stack">
+        <button type="button" id="prompt-copy" class="btn btn-primary btn-block">コピーする</button>
+        <div class="link-row">
+          <a class="btn btn-secondary" href="https://chatgpt.com/" target="_blank" rel="noopener">ChatGPTを開く</a>
+          <a class="btn btn-secondary" href="https://claude.ai/new" target="_blank" rel="noopener">Claudeを開く</a>
+        </div>
+      </div>
+      <div class="dlg-actions">
+        <button type="button" class="btn btn-secondary" data-close>閉じる</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast-region" aria-live="polite" aria-atomic="true" id="toast-region"></div>
+
+  <script src="foods.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
