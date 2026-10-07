@@ -88,13 +88,14 @@ main:focus { outline: none; }
 .file-btn { position: relative; }
 
 /* ── 追加フォーム ── */
-.add-form { position: relative; display: flex; gap: 8px; margin-bottom: 12px; }
-.add-input-wrap { position: relative; flex: 1; min-width: 0; }
-.add-form input[type="text"] {
-  width: 100%; min-height: var(--tap); padding: 8px 14px;
+.add-form { position: relative; margin-bottom: 12px; }
+.add-row { display: flex; align-items: center; gap: 8px; }
+.add-row input[type="text"] {
+  flex: 1; min-width: 0; min-height: var(--tap); padding: 8px 14px;
   border: 2px solid var(--control-line); border-radius: 12px; background: var(--surface);
 }
-.add-form .icon-btn { border: 2px solid var(--green); color: var(--green); background: var(--surface); }
+.add-row .icon-btn { flex-shrink: 0; border: 2px solid var(--green); color: var(--green); background: var(--surface); }
+.add-row .btn { flex-shrink: 0; }
 .suggest {
   position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
   list-style: none; margin: 0; padding: 4px;
@@ -102,14 +103,12 @@ main:focus { outline: none; }
   box-shadow: 0 8px 24px rgba(31, 26, 20, .12);
   max-height: 50vh; overflow: auto;
 }
-/* ダイアログの中では下に押し出す形で表示(切れないように) */
-dialog .suggest { position: static; margin-top: 4px; box-shadow: none; max-height: 40vh; }
+/* ダイアログの中では入力欄の下に押し出す形で表示(切れないように) */
+dialog .suggest { position: static; margin-top: 6px; box-shadow: none; max-height: 40vh; }
 .suggest li {
-  min-height: var(--tap); padding: 8px 12px; border-radius: 8px;
-  display: flex; justify-content: space-between; align-items: center; gap: 8px; cursor: pointer;
+  display: flex; align-items: center; min-height: var(--tap); padding: 8px 12px; border-radius: 8px; cursor: pointer;
 }
 .suggest li[aria-selected="true"], .suggest li:hover { background: var(--orange-soft); }
-.suggest .meta { color: var(--muted); font-size: .85rem; white-space: nowrap; }
 
 /* ── リスト共通 ── */
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -158,7 +157,7 @@ input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--green); 
 .swipe-bg-buy { background: var(--green); justify-content: flex-end; }
 .item[data-dir="right"] .swipe-bg-delete, .item[data-dir="left"] .swipe-bg-buy { visibility: visible; }
 .item-fg {
-  position: relative; display: flex; align-items: center; gap: 4px;
+  position: relative; display: flex; align-items: center; gap: 2px;
   min-height: 48px; padding: 0 2px 0 8px;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   touch-action: pan-y;
@@ -167,6 +166,8 @@ input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--green); 
 .item.is-warn .item-fg { border: 2px solid #E08A1E; }
 .item.is-today .item-fg, .item.is-over .item-fg { border: 2px solid var(--over-bg); }
 .item.armed .swipe-bg { filter: brightness(1.15); }
+.item-fg .name-btn { flex: 0 1 auto; }
+.item-right { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding-right: 8px; flex-shrink: 0; }
 .staple-mark { display: inline-flex; color: var(--green); flex-shrink: 0; }
 .staple-mark svg { width: 18px; height: 18px; }
 .staple-mark svg path { fill: currentColor; }

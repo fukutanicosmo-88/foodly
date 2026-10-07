@@ -250,9 +250,11 @@ function renderHomeItem(i) {
       <div class="swipe-bg swipe-bg-buy" aria-hidden="true">買うリストへ</div>
       <div class="item-fg">
         <button type="button" class="name-btn" data-action="edit" data-id="${i.id}" aria-label="${esc(i.name)}、${esc(s.text)}${i.staple ? '、定番' : ''}${i.frozen ? '、冷凍中' : ''}。編集する">${esc(i.name)}</button>
-        ${staple}
-        <span class="status status-${s.kind}">${esc(s.text)}</span>
         <button type="button" class="icon-btn freeze-btn" data-action="freeze" data-id="${i.id}" aria-pressed="${!!i.frozen}" ${nativeFrozen ? 'disabled' : ''} aria-label="「${esc(i.name)}」を冷凍した">${ICON.snow}</button>
+        <span class="item-right">
+          ${staple}
+          <span class="status status-${s.kind}">${esc(s.text)}</span>
+        </span>
       </div>
     </li>`;
 }
@@ -348,14 +350,14 @@ function buildAddForm(slot) {
   const uidp = `add-${list}`;
   slot.innerHTML = `
     <form class="add-form" autocomplete="off">
-      <div class="add-input-wrap">
+      <div class="add-row">
         <label class="visually-hidden" for="${uidp}-input">${list === 'buy' ? '買うリストに追加する食材' : '家にある食材に追加する食材'}</label>
         <input type="text" id="${uidp}-input" placeholder="食材名を入力" enterkeyhint="done"
           role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${uidp}-list">
-        <ul class="suggest" id="${uidp}-list" role="listbox" aria-label="候補" hidden></ul>
+        <button type="button" class="icon-btn" data-scan aria-label="バーコードで追加">${ICON.scan}</button>
+        <button type="submit" class="btn btn-primary">追加</button>
       </div>
-      <button type="button" class="icon-btn" data-scan aria-label="バーコードで追加">${ICON.scan}</button>
-      <button type="submit" class="btn btn-primary">追加</button>
+      <ul class="suggest" id="${uidp}-list" role="listbox" aria-label="候補" hidden></ul>
     </form>`;
   const form = slot.querySelector('form');
   const input = form.querySelector('input');
@@ -371,9 +373,7 @@ function buildAddForm(slot) {
     options = searchMaster(input.value);
     if (!options.length) return close();
     lb.innerHTML = options.map((m, idx) => `
-      <li role="option" id="${uidp}-opt-${idx}" data-idx="${idx}" aria-selected="false">
-        <span>${esc(m.name)}</span><span class="meta">${esc(m.category)}・${STORAGE_LABEL[m.storage]}${m.days}日</span>
-      </li>`).join('');
+      <li role="option" id="${uidp}-opt-${idx}" data-idx="${idx}" aria-selected="false">${esc(m.name)}</li>`).join('');
     lb.hidden = false;
     input.setAttribute('aria-expanded', 'true');
     active = -1;
@@ -550,7 +550,7 @@ const homeGroups = document.getElementById('home-groups');
 homeGroups.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   const fg = e.target.closest('.item-fg');
-  if (!fg || e.target.closest('.freeze-btn')) return;
+  if (!fg) return; // カードのどこからでも(右端・冷凍アイコンの上からでも)スワイプできる
   const li = fg.closest('.item');
   swipe = { li, fg, id: li.dataset.id, x0: e.clientX, y0: e.clientY, dx: 0, lock: null, pid: e.pointerId, w: li.offsetWidth };
 });
@@ -568,6 +568,10 @@ homeGroups.addEventListener('pointermove', (e) => {
       return;
     } else return;
   }
+  // 速さを記録(短くても素早く払えば判定するため)
+  const now = performance.now();
+  if (swipe.t) swipe.v = (dx - swipe.dx) / Math.max(1, now - swipe.t);
+  swipe.t = now;
   swipe.dx = dx;
   swipe.fg.classList.remove('snap');
   swipe.fg.style.transform = `translateX(${dx}px)`;
@@ -581,7 +585,9 @@ function endSwipe(e, cancelled) {
   swipe = null;
   if (s.lock !== 'x') return;
   suppressClickUntil = Date.now() + 400;
-  const commit = !cancelled && Math.abs(s.dx) > threshold(s.w);
+  // 十分な距離を動かした、または短くても同じ向きに素早く払った(フリック)
+  const flick = Math.abs(s.dx) > 24 && Math.abs(s.v || 0) > 0.45 && Math.sign(s.v) === Math.sign(s.dx);
+  const commit = !cancelled && (Math.abs(s.dx) > threshold(s.w) || flick);
   s.fg.classList.add('snap');
   if (!commit) {
     s.fg.style.transform = '';
