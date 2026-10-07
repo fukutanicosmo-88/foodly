@@ -26,6 +26,7 @@
         <h2 id="h-buy" class="view-title">買うリスト</h2>
       </div>
       <div class="add-slot" data-list="buy"></div>
+      <p class="hint" id="buy-hint" hidden>右端の≡をドラッグすると並べ替えられます。</p>
       <ul id="buy-list" class="list" aria-label="買うリストの食材"></ul>
       <p id="buy-empty" class="empty" hidden>買うものはありません。上の入力欄から追加できます。</p>
     </section>
@@ -41,7 +42,7 @@
       <div class="sort-row" id="sort-row">
         <fieldset class="sort-toggle">
           <legend class="visually-hidden">表示のしかた</legend>
-          <label><input type="radio" name="home-sort" value="storage"><span>保存場所別</span></label>
+          <label><input type="radio" name="home-sort" value="expiry"><span>期限が近い順</span></label>
           <label><input type="radio" name="home-sort" value="category"><span>種類別</span></label>
         </fieldset>
       </div>
@@ -54,6 +55,7 @@
     <section id="view-recipe" class="view" aria-labelledby="h-recipe" hidden>
       <div class="view-head">
         <h2 id="h-recipe" class="view-title">レシピを考える</h2>
+        <button type="button" id="recipe-clear" class="btn btn-secondary btn-small" disabled>選択をすべて解除</button>
       </div>
       <p class="hint">使いたい食材を選ぶと、ChatGPTやClaudeに貼り付けるためのプロンプトを作ります。期限が近い順に並んでいます。</p>
       <ul id="recipe-list" class="list list-compact" aria-label="家にある食材"></ul>
@@ -123,7 +125,7 @@
         </details>
       </div>
 
-      <p class="hint center">foodly v1.3</p>
+      <p class="hint center">foodly v1.4</p>
     </section>
   </main>
 
@@ -200,6 +202,10 @@
             <button type="button" class="chip" data-days="30">1か月</button>
           </div>
         </div>
+      </div>
+      <div class="move-actions buy-only" role="group" aria-label="買うリストでの並び順">
+        <button type="button" class="btn btn-secondary" id="edit-up">上へ移動</button>
+        <button type="button" class="btn btn-secondary" id="edit-down">下へ移動</button>
       </div>
       <label class="check-field buy-only">
         <input type="checkbox" id="edit-staple">

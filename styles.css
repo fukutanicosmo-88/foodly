@@ -350,3 +350,12 @@ body.recipe-open .toast-region { bottom: calc(var(--tabbar-h) + env(safe-area-in
 .freeze-sub { display: block; font-size: .8rem; font-weight: 400; color: var(--muted); }
 .freeze-field input[role="switch"]:checked { background: var(--blue); }
 .freeze-field input[role="switch"]:disabled { opacity: .6; cursor: default; }
+
+/* 買うリストの並べ替え */
+.drag-handle { touch-action: none; cursor: grab; color: var(--muted); }
+.row.dragging { position: relative; z-index: 5; box-shadow: 0 8px 20px rgba(31, 26, 20, .2); border-color: var(--green); }
+.row.dragging .drag-handle { cursor: grabbing; }
+@media (prefers-reduced-motion: no-preference) {
+  .row:not(.dragging) { transition: transform .15s ease-out; }
+}
+.view-head .btn-small { min-height: var(--tap); padding: 6px 14px; font-size: .85rem; }
