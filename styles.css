@@ -331,3 +331,22 @@ body.recipe-open .toast-region { bottom: calc(var(--tabbar-h) + env(safe-area-in
   @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 }
 .dlg-title:focus { outline: none; }
+
+/* カード全体をタップで詳細を開く(食材名のボタンをカード全体に広げる) */
+.item-fg .name-btn { position: static; }
+.item-fg .name-btn::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
+.item-fg .name-btn:focus-visible { outline: none; }
+.item-fg:has(.name-btn:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.item-right { pointer-events: none; }
+.frozen-mark { display: inline-flex; color: var(--blue); flex-shrink: 0; }
+.frozen-mark svg { width: 18px; height: 18px; }
+
+/* 詳細の冷凍スイッチ */
+.segmented-2 { grid-template-columns: repeat(2, 1fr); }
+.freeze-field { margin: 0 0 14px; padding: 8px 12px; border-radius: 12px; background: var(--blue-soft); align-items: center; }
+.freeze-label { display: flex; align-items: center; gap: 10px; }
+.freeze-icon { display: inline-flex; color: var(--blue); }
+.freeze-icon svg { width: 24px; height: 24px; }
+.freeze-sub { display: block; font-size: .8rem; font-weight: 400; color: var(--muted); }
+.freeze-field input[role="switch"]:checked { background: var(--blue); }
+.freeze-field input[role="switch"]:disabled { opacity: .6; cursor: default; }

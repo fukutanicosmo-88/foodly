@@ -187,25 +187,15 @@ function toggleStaple(id) {
   focusAction(id, 'staple');
 }
 
-function toggleFrozen(id) {
-  const item = byId(id);
-  if (!item) return;
-  if (!item.frozen) {
-    const m = item.masterId ? MASTER_BY_ID.get(item.masterId) : null;
-    item.prev = { storage: item.storage, expiry: item.expiry };
-    item.storage = 'freezer';
-    item.frozen = true;
-    item.expiry = addDays(todayStr(), (m && m.freezerDays) || DEFAULT_FREEZER_DAYS);
-    announce(`「${item.name}」を冷凍しました。期限は${jpDate(item.expiry)}です`);
-  } else {
-    if (item.prev) { item.storage = item.prev.storage; item.expiry = item.prev.expiry; }
-    else item.storage = 'fridge';
-    item.frozen = false;
-    item.prev = null;
-    announce(`「${item.name}」の冷凍を解除しました`);
-  }
-  save(); render();
-  focusAction(id, 'freeze');
+// 冷凍した日(今日)から数えた期限
+function freezerExpiry(item) {
+  const m = item.masterId ? MASTER_BY_ID.get(item.masterId) : null;
+  return addDays(todayStr(), (m && m.freezerDays) || DEFAULT_FREEZER_DAYS);
+}
+// 最初から冷凍食品として登録されたもの(冷凍を外せない)
+function isNativeFrozen(item) {
+  const m = item.masterId ? MASTER_BY_ID.get(item.masterId) : null;
+  return !!(item.frozen && !item.prev && m && m.storage === 'freezer');
 }
 
 /* ───────── 描画 ───────── */
@@ -241,17 +231,16 @@ function renderBuy() {
 
 function renderHomeItem(i) {
   const s = statusOf(i);
-  const m = i.masterId ? MASTER_BY_ID.get(i.masterId) : null;
-  const nativeFrozen = i.frozen && !i.prev && m && m.storage === 'freezer';
-  const staple = i.staple ? `<span class="staple-mark" role="img" aria-label="定番">${ICON.star}</span>` : '';
+  // 定番・冷凍の印は見た目だけ(読み上げは食材名ボタンのラベルに含めている)
+  const staple = i.staple ? `<span class="staple-mark" aria-hidden="true">${ICON.star}</span>` : '';
   return `
     <li class="item is-${s.kind}" data-id="${i.id}">
       <div class="swipe-bg swipe-bg-delete" aria-hidden="true">削除</div>
       <div class="swipe-bg swipe-bg-buy" aria-hidden="true">買うリストへ</div>
       <div class="item-fg">
         <button type="button" class="name-btn" data-action="edit" data-id="${i.id}" aria-label="${esc(i.name)}、${esc(s.text)}${i.staple ? '、定番' : ''}${i.frozen ? '、冷凍中' : ''}。編集する">${esc(i.name)}</button>
-        <button type="button" class="icon-btn freeze-btn" data-action="freeze" data-id="${i.id}" aria-pressed="${!!i.frozen}" ${nativeFrozen ? 'disabled' : ''} aria-label="「${esc(i.name)}」を冷凍した">${ICON.snow}</button>
         <span class="item-right">
+          ${i.frozen ? `<span class="frozen-mark" aria-hidden="true">${ICON.snow}</span>` : ''}
           ${staple}
           <span class="status status-${s.kind}">${esc(s.text)}</span>
         </span>
@@ -444,6 +433,7 @@ document.getElementById('home-add').addEventListener('click', () => {
 /* ───────── 編集ダイアログ ───────── */
 const dlgEdit = document.getElementById('dlg-edit');
 let editingId = null;
+let editOriginal = null;
 document.getElementById('edit-category').innerHTML = CATEGORIES.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
 
 function openEdit(id, note) {
@@ -459,7 +449,13 @@ function openEdit(id, note) {
   dlgEdit.querySelectorAll('.home-only').forEach((el) => { el.hidden = !isHome; });
   dlgEdit.querySelectorAll('.buy-only').forEach((el) => { el.hidden = isHome; });
   document.getElementById('edit-category').value = item.category || OTHER;
-  dlgEdit.querySelectorAll('input[name="edit-storage"]').forEach((r) => { r.checked = r.value === item.storage; });
+  // 保存場所は「冷蔵/常温」、冷凍はスイッチで別に管理する
+  const baseStorage = item.frozen ? ((item.prev && item.prev.storage) || 'fridge') : item.storage;
+  dlgEdit.querySelectorAll('input[name="edit-storage"]').forEach((r) => { r.checked = r.value === (baseStorage === 'pantry' ? 'pantry' : 'fridge'); });
+  const frozenEl = document.getElementById('edit-frozen');
+  frozenEl.checked = !!item.frozen;
+  frozenEl.disabled = isNativeFrozen(item);
+  editOriginal = { expiry: item.expiry || '', frozen: !!item.frozen, prevExpiry: item.prev ? item.prev.expiry || '' : '' };
   document.getElementById('edit-expiry').value = item.expiry || '';
   updateExpiryText();
   document.getElementById('edit-staple').checked = !!item.staple;
@@ -478,6 +474,18 @@ function updateExpiryText() {
   }
   document.getElementById('edit-expiry-text').textContent = text;
 }
+// 冷凍スイッチを切り替えたら、その場で期限を数え直して見せる
+document.getElementById('edit-frozen').addEventListener('change', (e) => {
+  const item = byId(editingId);
+  if (!item || !editOriginal) return;
+  const exp = document.getElementById('edit-expiry');
+  if (e.target.checked) {
+    exp.value = editOriginal.frozen ? editOriginal.expiry : freezerExpiry(item);
+  } else {
+    exp.value = editOriginal.frozen ? editOriginal.prevExpiry : editOriginal.expiry;
+  }
+  updateExpiryText();
+});
 document.getElementById('edit-expiry').addEventListener('change', updateExpiryText);
 document.getElementById('edit-expiry').addEventListener('input', updateExpiryText);
 dlgEdit.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
@@ -500,13 +508,24 @@ document.getElementById('edit-form').addEventListener('submit', (e) => {
   }
   if (item.list === 'home') {
     item.category = category;
-    const st = (dlgEdit.querySelector('input[name="edit-storage"]:checked') || {}).value || item.storage;
-    if (st !== item.storage) {
-      item.storage = st;
-      item.frozen = st === 'freezer';
+    const base = (dlgEdit.querySelector('input[name="edit-storage"]:checked') || {}).value || 'fridge';
+    const frozenNow = document.getElementById('edit-frozen').checked;
+    const expiry = document.getElementById('edit-expiry').value || null;
+    if (frozenNow && !item.frozen) {
+      // 冷凍した:元の保存場所と期限を覚えておく(解除したとき戻せるように)
+      item.prev = { storage: base, expiry: editOriginal.expiry || null };
+      item.storage = 'freezer';
+      item.frozen = true;
+    } else if (!frozenNow && item.frozen) {
+      item.storage = base;
+      item.frozen = false;
       item.prev = null;
+    } else if (frozenNow && item.frozen) {
+      if (item.prev) item.prev.storage = base;
+    } else {
+      item.storage = base;
     }
-    item.expiry = document.getElementById('edit-expiry').value || null;
+    item.expiry = expiry;
   } else {
     item.staple = document.getElementById('edit-staple').checked;
   }
@@ -702,6 +721,12 @@ function buildPrompt(items) {
   const seasonings = [...new Set(homeItems()
     .filter((i) => i.category === SEASONING && !picked.has(i.id))
     .map((i) => i.name))];
+  // そのほか家にある食材(選んでいないもの)。1行にまとめて短く保つ
+  const pickedNames = new Set(items.map((i) => norm(i.name)));
+  const others = [...new Set(homeItems()
+    .filter((i) => !picked.has(i.id) && i.category !== SEASONING && !pickedNames.has(norm(i.name)))
+    .sort(sortByExpiry)
+    .map((i) => i.name))];
   const servings = Number(state.settings.servings) || 2;
   return [
     '次の食材を使って作れる家庭料理のレシピを3つ提案してください。',
@@ -709,11 +734,13 @@ function buildPrompt(items) {
     '使いたい食材:',
     ...lines,
     '',
+    ...(others.length ? ['そのほか家にある食材(必要なら使ってよい):', `- ${others.join('、')}`, ''] : []),
     ...(seasonings.length ? ['家にある調味料(必要なら使ってよい):', `- ${seasonings.join('、')}`, ''] : []),
     '条件:',
-    '- 期限が近い食材(カッコ内に残り日数があるもの)をできるだけ優先して使う',
+    '- 「使いたい食材」を中心に使い、期限が近いもの(カッコ内に残り日数があるもの)をできるだけ優先する',
+    '- 足りない材料は、できるだけ「そのほか家にある食材」と「家にある調味料」から選ぶ',
     '- 塩、こしょう、しょうゆ、砂糖、みりん、酒、油などの基本的な調味料は家にあるものとする',
-    '- 上の食材と調味料以外に必要な材料があれば、わかるように書く',
+    '- それでも買い足しが必要な材料があれば、わかるように書く',
     `- 各レシピに、材料と分量(${servings}人分)、手順、調理時間を書く`,
   ].join('\n');
 }
@@ -865,7 +892,6 @@ document.getElementById('main').addEventListener('click', (e) => {
     case 'edit': openEdit(id); break;
     case 'staple': toggleStaple(id); break;
     case 'delete': removeItem(id); break;
-    case 'freeze': toggleFrozen(id); break;
   }
 });
 document.getElementById('main').addEventListener('change', (e) => {

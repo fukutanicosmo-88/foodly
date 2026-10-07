@@ -123,7 +123,7 @@
         </details>
       </div>
 
-      <p class="hint center">foodly v1.2.1</p>
+      <p class="hint center">foodly v1.3</p>
     </section>
   </main>
 
@@ -174,12 +174,18 @@
         </label>
         <fieldset class="field">
           <legend class="field-label">保存場所</legend>
-          <div class="segmented">
+          <div class="segmented segmented-2">
             <label><input type="radio" name="edit-storage" value="fridge"><span>冷蔵</span></label>
-            <label><input type="radio" name="edit-storage" value="freezer"><span>冷凍</span></label>
             <label><input type="radio" name="edit-storage" value="pantry"><span>常温</span></label>
           </div>
         </fieldset>
+        <label class="switch-field freeze-field">
+          <span class="freeze-label">
+            <span class="freeze-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.5v19M3.8 7.25l16.4 9.5M3.8 16.75l16.4-9.5M9.5 4l2.5 2.5L14.5 4M9.5 20l2.5-2.5 2.5 2.5M4.2 10.6l3.4-.9-.9-3.4M19.8 13.4l-3.4.9.9 3.4M4.2 13.4l3.4.9-.9 3.4M19.8 10.6l-3.4-.9.9-3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <span>冷凍した<span class="freeze-sub" id="freeze-sub">オンにすると今日から冷凍の期限で数え直します</span></span>
+          </span>
+          <input type="checkbox" role="switch" id="edit-frozen" aria-describedby="freeze-sub">
+        </label>
         <div class="field">
           <span class="field-label" id="edit-expiry-label">消費期限</span>
           <!-- 見た目はボタン。タップしたときだけカレンダーが開く -->
