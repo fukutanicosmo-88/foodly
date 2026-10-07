@@ -29,6 +29,7 @@ html { font: -apple-system-body; touch-action: manipulation; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body {
+  overscroll-behavior-x: none;
   margin: 0;
   background: var(--bg);
   color: var(--text);
@@ -127,7 +128,22 @@ input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--green); 
 .staple-btn[aria-pressed="true"] { color: var(--green); }
 .staple-btn[aria-pressed="true"] svg path { fill: currentColor; }
 
-/* 家にある食材:種類ごとのグループ */
+/* 家にある食材:表示の切り替え */
+.sort-row { margin: 0 0 8px; }
+.sort-toggle {
+  display: inline-grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0; padding: 3px; border: none;
+  background: var(--unset-bg); border-radius: 999px;
+}
+.sort-toggle label { position: relative; }
+.sort-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.sort-toggle span {
+  display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 16px;
+  border-radius: 999px; font-size: .9rem; font-weight: 700; color: var(--muted);
+}
+.sort-toggle input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(31, 26, 20, .15); }
+.sort-toggle input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+/* 家にある食材:グループ */
 .group { margin-bottom: 12px; }
 .group-title { font-size: .95rem; margin: 0 0 6px; display: flex; align-items: baseline; gap: 8px; }
 .group-title .count { color: var(--muted); font-weight: 400; font-size: .85rem; }
@@ -147,8 +163,9 @@ input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--green); 
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   touch-action: pan-y;
 }
-.item.is-warn .item-fg { box-shadow: inset 5px 0 0 #E08A1E; }
-.item.is-today .item-fg, .item.is-over .item-fg { box-shadow: inset 5px 0 0 var(--over-bg); }
+/* 期限が近い食材は枠線の色で目立たせる(状態の文字も必ず表示) */
+.item.is-warn .item-fg { border: 2px solid #E08A1E; }
+.item.is-today .item-fg, .item.is-over .item-fg { border: 2px solid var(--over-bg); }
 .item.armed .swipe-bg { filter: brightness(1.15); }
 .staple-mark { display: inline-flex; color: var(--green); flex-shrink: 0; }
 .staple-mark svg { width: 18px; height: 18px; }
@@ -253,6 +270,38 @@ textarea { min-height: 200px; line-height: 1.5; resize: vertical; }
 .segmented input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: 2px; }
 .quick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .chip { min-height: var(--tap); padding: 4px 14px; border-radius: 999px; border: 2px solid var(--control-line); background: var(--surface); font-weight: 700; cursor: pointer; }
+/* 消費期限:ボタンの見た目の上に透明な日付入力を重ねる */
+.date-btn {
+  position: relative; display: flex; align-items: center; min-height: var(--tap); padding: 8px 40px 8px 14px;
+  border: 2px solid var(--control-line); border-radius: 12px; background: var(--surface); font-weight: 700;
+}
+.date-btn::after {
+  content: ""; position: absolute; right: 12px; top: 50%; width: 20px; height: 20px; transform: translateY(-50%);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3.5' y='5' width='17' height='15' rx='2' fill='none' stroke='%231F1A14' stroke-width='2'/%3E%3Cpath d='M3.5 10h17M8 3v4M16 3v4' fill='none' stroke='%231F1A14' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+.date-btn.is-empty .date-btn-text { color: var(--muted); font-weight: 400; }
+.date-btn input[type="date"] {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0;
+  opacity: 0; border: none; cursor: pointer; -webkit-appearance: none; appearance: none;
+}
+.date-btn:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* スイッチ */
+.switch-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--tap); font-weight: 700; cursor: pointer; margin-bottom: 4px; }
+.switch-field input[role="switch"] {
+  -webkit-appearance: none; appearance: none; flex-shrink: 0;
+  width: 52px; height: 32px; border-radius: 16px; background: var(--control-line); position: relative; cursor: pointer; margin: 0;
+}
+.switch-field input[role="switch"]::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+}
+.switch-field input[role="switch"]:checked { background: var(--green); }
+.switch-field input[role="switch"]:checked::after { left: 23px; }
+@media (prefers-reduced-motion: no-preference) {
+  .switch-field input[role="switch"]::after { transition: left .15s ease-out; }
+}
+
 .check-field { display: flex; align-items: center; gap: 10px; min-height: var(--tap); cursor: pointer; }
 .reader { width: 100%; min-height: 200px; background: #000; border-radius: 12px; overflow: hidden; }
 .reader video { width: 100% !important; display: block; }
@@ -280,3 +329,4 @@ body.recipe-open .toast-region { bottom: calc(var(--tabbar-h) + env(safe-area-in
   .toast { animation: toast-in .18s ease-out; }
   @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 }
+.dlg-title:focus { outline: none; }

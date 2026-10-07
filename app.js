@@ -6,7 +6,10 @@ const STORE_KEY = 'foodly-v1';
 const WARN_DAYS = 3;
 const DEFAULT_FREEZER_DAYS = 30;
 const OTHER = 'その他';
+const SEASONING = '調味料・漬物';
+const DEFAULT_SETTINGS = { homeSort: 'storage', servings: 2, badge: true };
 const STORAGE_LABEL = { fridge: '冷蔵', freezer: '冷凍', pantry: '常温' };
+const STORAGE_ORDER = ['fridge', 'freezer', 'pantry'];
 const ST_CODE = { r: 'fridge', f: 'freezer', p: 'pantry' };
 const SCANNER_SRC = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
 
@@ -73,11 +76,12 @@ function load() {
       if (d && Array.isArray(d.items)) {
         // v1.0 のデータには種類がないので補う
         d.items.forEach((i) => { if (!i.category || !CATEGORIES.includes(i.category)) i.category = categoryFor(i); });
+        d.settings = { ...DEFAULT_SETTINGS, ...(d.settings || {}) };
         return d;
       }
     }
   } catch (e) { /* 読めない場合は空で始める */ }
-  return { version: 1, items: [] };
+  return { version: 1, items: [], settings: { ...DEFAULT_SETTINGS } };
 }
 let state = load();
 function save() {
@@ -255,18 +259,31 @@ function renderHomeItem(i) {
 
 function renderHome() {
   const items = homeItems();
-  document.getElementById('home-groups').innerHTML = CATEGORIES.map((c, idx) => {
-    const g = items.filter((i) => (i.category || OTHER) === c).sort(sortByExpiry);
-    if (!g.length) return '';
+  // いつもの表示は保存場所別(冷蔵・冷凍・常温)、切り替えで種類別
+  const byCategory = state.settings.homeSort === 'category';
+  const groups = byCategory
+    ? CATEGORIES.map((c) => ({ label: c, items: items.filter((i) => (i.category || OTHER) === c) }))
+    : STORAGE_ORDER.map((st) => ({ label: STORAGE_LABEL[st], items: items.filter((i) => i.storage === st) }));
+  document.getElementById('home-groups').innerHTML = groups.map((g, idx) => {
+    if (!g.items.length) return '';
+    g.items.sort(sortByExpiry);
     return `
       <section class="group" aria-labelledby="g-${idx}">
-        <h3 class="group-title" id="g-${idx}">${esc(c)}<span class="count">${g.length}件</span></h3>
-        <ul class="list">${g.map(renderHomeItem).join('')}</ul>
+        <h3 class="group-title" id="g-${idx}">${esc(g.label)}<span class="count">${g.items.length}件</span></h3>
+        <ul class="list">${g.items.map(renderHomeItem).join('')}</ul>
       </section>`;
   }).join('');
+  document.querySelectorAll('input[name="home-sort"]').forEach((r) => { r.checked = r.value === state.settings.homeSort; });
   document.getElementById('home-empty').hidden = items.length > 0;
   document.getElementById('swipe-hint').hidden = items.length === 0;
+  document.getElementById('sort-row').hidden = items.length === 0;
 }
+document.querySelectorAll('input[name="home-sort"]').forEach((r) => r.addEventListener('change', () => {
+  if (!r.checked) return;
+  state.settings.homeSort = r.value;
+  save();
+  renderHome();
+}));
 
 function renderRecipe() {
   const items = homeItems().sort(sortByExpiry);
@@ -444,12 +461,28 @@ function openEdit(id, note) {
   document.getElementById('edit-category').value = item.category || OTHER;
   dlgEdit.querySelectorAll('input[name="edit-storage"]').forEach((r) => { r.checked = r.value === item.storage; });
   document.getElementById('edit-expiry').value = item.expiry || '';
+  updateExpiryText();
   document.getElementById('edit-staple').checked = !!item.staple;
   dlgEdit.showModal();
-  if (note) document.getElementById('edit-expiry').focus();
+  // 入力欄やカレンダーが勝手に開かないよう、見出しにフォーカスを置く
+  document.getElementById('dlg-edit-title').focus();
 }
+function updateExpiryText() {
+  const v = document.getElementById('edit-expiry').value;
+  const box = document.querySelector('.date-btn');
+  box.classList.toggle('is-empty', !v);
+  let text = 'タップして日付を選ぶ';
+  if (v) {
+    const s = statusOf({ expiry: v });
+    text = `${v.slice(0, 4)}年${jpDate(v)}` + (s.kind === 'ok' ? `(あと${s.n}日)` : `(${s.text})`);
+  }
+  document.getElementById('edit-expiry-text').textContent = text;
+}
+document.getElementById('edit-expiry').addEventListener('change', updateExpiryText);
+document.getElementById('edit-expiry').addEventListener('input', updateExpiryText);
 dlgEdit.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
   document.getElementById('edit-expiry').value = addDays(todayStr(), Number(c.dataset.days));
+  updateExpiryText();
 }));
 document.getElementById('edit-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -526,7 +559,8 @@ homeGroups.addEventListener('pointermove', (e) => {
   const dx = e.clientX - swipe.x0;
   const dy = e.clientY - swipe.y0;
   if (!swipe.lock) {
-    if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+    // 少しの横移動でも横スワイプとして扱う(斜めに動いても拾えるように)
+    if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 0.7) {
       swipe.lock = 'x';
       try { swipe.fg.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
     } else if (Math.abs(dy) > 10) {
@@ -540,7 +574,7 @@ homeGroups.addEventListener('pointermove', (e) => {
   swipe.li.dataset.dir = dx < 0 ? 'left' : 'right';
   swipe.li.classList.toggle('armed', Math.abs(dx) > threshold(swipe.w));
 });
-function threshold(w) { return Math.min(110, w * 0.3); }
+function threshold(w) { return Math.min(72, w * 0.2); }
 function endSwipe(e, cancelled) {
   if (!swipe || (e && e.pointerId !== swipe.pid)) return;
   const s = swipe;
@@ -652,24 +686,38 @@ document.getElementById('scan-manual').addEventListener('submit', (e) => {
 
 /* ───────── レシピ ───────── */
 function buildPrompt(items) {
+  const picked = new Set(items.map((i) => i.id));
   const lines = items.sort(sortByExpiry).map((i) => {
     const s = statusOf(i);
     const tag = s.kind === 'ok' || s.kind === 'unset' ? '' : `(${s.text})`;
     return `- ${i.name}${tag}`;
   });
+  // 家にある調味料(選んだ食材と重複するもの・同名のものは1回だけ)
+  const seasonings = [...new Set(homeItems()
+    .filter((i) => i.category === SEASONING && !picked.has(i.id))
+    .map((i) => i.name))];
+  const servings = Number(state.settings.servings) || 2;
   return [
     '次の食材を使って作れる家庭料理のレシピを3つ提案してください。',
     '',
     '使いたい食材:',
     ...lines,
     '',
+    ...(seasonings.length ? ['家にある調味料(必要なら使ってよい):', `- ${seasonings.join('、')}`, ''] : []),
     '条件:',
     '- 期限が近い食材(カッコ内に残り日数があるもの)をできるだけ優先して使う',
     '- 塩、こしょう、しょうゆ、砂糖、みりん、酒、油などの基本的な調味料は家にあるものとする',
-    '- 上の食材以外に必要な材料があれば、わかるように書く',
-    '- 各レシピに、材料と分量(2人分)、手順、調理時間を書く',
+    '- 上の食材と調味料以外に必要な材料があれば、わかるように書く',
+    `- 各レシピに、材料と分量(${servings}人分)、手順、調理時間を書く`,
   ].join('\n');
 }
+const servingsEl = document.getElementById('servings');
+servingsEl.value = String(state.settings.servings);
+servingsEl.addEventListener('change', () => {
+  state.settings.servings = Number(servingsEl.value);
+  save();
+  announce(`${servingsEl.value}人分にしました`);
+});
 document.getElementById('recipe-make').addEventListener('click', () => {
   const items = [...recipeSel].map(byId).filter(Boolean);
   if (!items.length) return;
@@ -691,32 +739,36 @@ document.getElementById('prompt-copy').addEventListener('click', async () => {
 function updateAppBadge(n) {
   try {
     if (!('setAppBadge' in navigator)) return;
-    (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+    const show = state.settings.badge && n > 0;
+    (show ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
   } catch (e) { /* noop */ }
+}
+function badgeSupported() {
+  return 'setAppBadge' in navigator && 'Notification' in window;
+}
+function isStandalone() {
+  return window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
 }
 function renderBadgeSettings() {
   const status = document.getElementById('badge-status');
-  const btn = document.getElementById('badge-enable');
-  const standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
-  if (!standalone) {
-    status.textContent = 'Safariの共有ボタンから「ホーム画面に追加」し、ホーム画面のアイコンから開くと使えます。';
-    btn.hidden = true;
-  } else if (!('setAppBadge' in navigator) || !('Notification' in window)) {
-    status.textContent = 'この端末ではバッジを使えません。';
-    btn.hidden = true;
-  } else if (Notification.permission === 'granted') {
-    status.textContent = 'バッジは有効です。';
-    btn.hidden = true;
-  } else if (Notification.permission === 'denied') {
-    status.textContent = '許可されていません。iPhoneの「設定」→「通知」→「foodly」から許可できます。';
-    btn.hidden = true;
-  } else {
-    status.textContent = 'バッジを表示するには、通知の許可が必要です(通知は送りません)。';
-    btn.hidden = false;
-  }
+  const toggle = document.getElementById('badge-toggle');
+  toggle.checked = !!state.settings.badge;
+  toggle.setAttribute('aria-describedby', 'badge-status');
+  let msg = '';
+  if (!state.settings.badge) msg = 'オフになっています。';
+  else if (!isStandalone()) msg = 'ホーム画面に追加したアイコンから開くと表示されます(Safariの共有ボタン→「ホーム画面に追加」)。';
+  else if (!badgeSupported()) msg = 'この端末ではバッジを使えません。';
+  else if (Notification.permission === 'denied') msg = '通知が許可されていないため表示できません。iPhoneの「設定」→「通知」→「foodly」から許可できます。';
+  else if (Notification.permission !== 'granted') msg = 'オンにするとき、通知の許可を求められます(通知は送りません)。';
+  else msg = 'オンになっています。';
+  status.textContent = msg;
 }
-document.getElementById('badge-enable').addEventListener('click', async () => {
-  try { await Notification.requestPermission(); } catch (e) { /* noop */ }
+document.getElementById('badge-toggle').addEventListener('change', async (e) => {
+  state.settings.badge = e.target.checked;
+  save();
+  if (state.settings.badge && isStandalone() && badgeSupported() && Notification.permission === 'default') {
+    try { await Notification.requestPermission(); } catch (err) { /* noop */ }
+  }
   renderBadgeSettings();
   renderCounts();
 });

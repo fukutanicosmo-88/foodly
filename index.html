@@ -38,6 +38,13 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
         </button>
       </div>
+      <div class="sort-row" id="sort-row">
+        <fieldset class="sort-toggle">
+          <legend class="visually-hidden">表示のしかた</legend>
+          <label><input type="radio" name="home-sort" value="storage"><span>保存場所別</span></label>
+          <label><input type="radio" name="home-sort" value="category"><span>種類別</span></label>
+        </fieldset>
+      </div>
       <p class="hint" id="swipe-hint">左にスワイプで買うリストへ、右にスワイプで削除。タップで編集できます。</p>
       <div id="home-groups"></div>
       <p id="home-empty" class="empty" hidden>家にある食材はまだありません。買うリストでチェックを入れるか、右上の+から追加できます。</p>
@@ -77,8 +84,28 @@
       <div class="card">
         <h3 class="card-title">ホーム画面のバッジ</h3>
         <p>期限まで3日以内と期限切れの食材の数を、アプリのアイコンに表示します。数字はアプリを開いたときに更新されます。</p>
+        <label class="switch-field">
+          <span>バッジを表示する</span>
+          <input type="checkbox" role="switch" id="badge-toggle">
+        </label>
         <p id="badge-status" class="hint"></p>
-        <button type="button" id="badge-enable" class="btn btn-secondary btn-block" hidden>バッジを有効にする</button>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">レシピ</h3>
+        <p>レシピ用のプロンプトで、何人分の分量で聞くかを決めます。</p>
+        <label class="field">
+          <span class="field-label">分量</span>
+          <select id="servings">
+            <option value="1">1人分</option>
+            <option value="2">2人分</option>
+            <option value="3">3人分</option>
+            <option value="4">4人分</option>
+            <option value="5">5人分</option>
+            <option value="6">6人分</option>
+          </select>
+        </label>
+        <p class="hint">「調味料・漬物」の種類の食材は、家にある調味料としてプロンプトに自動で入ります。</p>
       </div>
 
       <div class="card">
@@ -96,7 +123,7 @@
         </details>
       </div>
 
-      <p class="hint center">foodly v1.1</p>
+      <p class="hint center">foodly v1.2</p>
     </section>
   </main>
 
@@ -134,7 +161,7 @@
   <!-- 編集 -->
   <dialog id="dlg-edit" aria-labelledby="dlg-edit-title">
     <form method="dialog" id="edit-form" class="dlg">
-      <h2 id="dlg-edit-title" class="dlg-title">食材を編集</h2>
+      <h2 id="dlg-edit-title" class="dlg-title" tabindex="-1">食材を編集</h2>
       <p id="edit-note" class="note" hidden></p>
       <label class="field">
         <span class="field-label">名前</span>
@@ -154,8 +181,12 @@
           </div>
         </fieldset>
         <div class="field">
-          <label class="field-label" for="edit-expiry">消費期限</label>
-          <input type="date" id="edit-expiry">
+          <span class="field-label" id="edit-expiry-label">消費期限</span>
+          <!-- 見た目はボタン。タップしたときだけカレンダーが開く -->
+          <div class="date-btn">
+            <span class="date-btn-text" id="edit-expiry-text" aria-hidden="true"></span>
+            <input type="date" id="edit-expiry" aria-labelledby="edit-expiry-label">
+          </div>
           <div class="quick" role="group" aria-label="今日から数えて期限を設定">
             <button type="button" class="chip" data-days="3">3日</button>
             <button type="button" class="chip" data-days="7">1週間</button>
