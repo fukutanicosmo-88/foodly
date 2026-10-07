@@ -5,8 +5,8 @@
 const STORE_KEY = 'foodly-v1';
 const WARN_DAYS = 3;
 const DEFAULT_FREEZER_DAYS = 30;
+const OTHER = 'その他';
 const STORAGE_LABEL = { fridge: '冷蔵', freezer: '冷凍', pantry: '常温' };
-const STORAGE_ORDER = ['fridge', 'freezer', 'pantry'];
 const ST_CODE = { r: 'fridge', f: 'freezer', p: 'pantry' };
 const SCANNER_SRC = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
 
@@ -15,10 +15,11 @@ function norm(s) {
   return (s || '').normalize('NFKC').toLowerCase().replace(/\s+/g, '')
     .replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
 }
-const MASTER = FOODS.map(([name, yomi, st, days, freezerDays, aliases]) => ({
-  id: name, name, yomi, storage: ST_CODE[st], days, freezerDays,
+const CATEGORIES = [...FOOD_GROUPS.map(([c]) => c), OTHER];
+const MASTER = FOOD_GROUPS.flatMap(([category, rows]) => rows.map(([name, yomi, st, days, freezerDays, aliases]) => ({
+  id: name, name, yomi, category, storage: ST_CODE[st], days, freezerDays,
   keys: [name, yomi, ...(aliases || [])].map(norm),
-}));
+})));
 const MASTER_BY_ID = new Map(MASTER.map((m) => [m.id, m]));
 
 function findMasterExact(name) {
@@ -57,15 +58,23 @@ function statusOf(item) {
   if (n <= WARN_DAYS) return { kind: 'warn', text: `あと${n}日`, n };
   return { kind: 'ok', text: `${jpDate(item.expiry)}まで`, n };
 }
-function isAlert(item) { const s = statusOf(item); return s.kind === 'warn' || s.kind === 'today' || s.kind === 'over'; }
+function isAlert(item) { const k = statusOf(item).kind; return k === 'warn' || k === 'today' || k === 'over'; }
 
 /* ───────── 保存 ───────── */
+function categoryFor(item) {
+  const m = item.masterId ? MASTER_BY_ID.get(item.masterId) : null;
+  return m ? m.category : OTHER;
+}
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const d = JSON.parse(raw);
-      if (d && Array.isArray(d.items)) return d;
+      if (d && Array.isArray(d.items)) {
+        // v1.0 のデータには種類がないので補う
+        d.items.forEach((i) => { if (!i.category || !CATEGORIES.includes(i.category)) i.category = categoryFor(i); });
+        return d;
+      }
     }
   } catch (e) { /* 読めない場合は空で始める */ }
   return { version: 1, items: [] };
@@ -105,6 +114,7 @@ function addItem(list, name, { masterId = null, manualExpiry = false } = {}) {
   const item = {
     id: uid(), name, list, staple: false,
     masterId: m ? m.id : null,
+    category: m ? m.category : OTHER,
     storage: m ? m.storage : 'fridge',
     expiry: null, frozen: false, prev: null,
     createdAt: todayStr(), movedAt: todayStr(),
@@ -113,8 +123,12 @@ function addItem(list, name, { masterId = null, manualExpiry = false } = {}) {
   state.items.push(item);
   save();
   render();
-  announce(`「${name}」を${list === 'buy' ? '買うリスト' : '家にある食材'}に追加しました`);
-  if (list === 'home' && !item.expiry) openEdit(item.id, '消費期限を入力してください');
+  if (list === 'home') {
+    if (!item.expiry) openEdit(item.id, '消費期限を入力してください');
+    else toast(`「${name}」を追加しました(${statusOf(item).text})`);
+  } else {
+    announce(`「${name}」を買うリストに追加しました`);
+  }
 }
 
 function purchase(id) {
@@ -128,50 +142,29 @@ function purchase(id) {
 }
 
 function addToBuyFrom(item) {
-  const exists = buyItems().some((b) => norm(b.name) === norm(item.name));
-  if (exists) return false;
+  if (buyItems().some((b) => norm(b.name) === norm(item.name))) return false;
   const m = item.masterId ? MASTER_BY_ID.get(item.masterId) : null;
   state.items.push({
-    id: uid(), name: item.name, list: 'buy', staple: item.staple, masterId: item.masterId,
+    id: uid(), name: item.name, list: 'buy', staple: !!item.staple, masterId: item.masterId,
+    category: item.category || categoryFor(item),
     storage: m ? m.storage : (item.prev ? item.prev.storage : (item.storage === 'freezer' ? 'fridge' : item.storage)),
     expiry: null, frozen: false, prev: null, createdAt: todayStr(), movedAt: todayStr(),
   });
   return true;
 }
 
-async function useUp(id) {
+// 家にある食材 → 買うリスト(左スワイプ)
+function moveToBuy(id) {
   const item = byId(id);
   if (!item) return;
   const snap = snapshot();
-  const others = homeItems().filter((i) => i.id !== id && norm(i.name) === norm(item.name));
   state.items = state.items.filter((i) => i.id !== id);
-
-  if (others.length) {
-    save(); render();
-    toast(`「${item.name}」を1つ使い切りました(残り${others.length})`, () => restore(snap));
-    return;
-  }
-  if (item.staple) {
-    addToBuyFrom(item);
-    save(); render();
-    toast(`「${item.name}」を買うリストに戻しました`, () => restore(snap));
-    return;
-  }
+  const added = addToBuyFrom(item);
   save(); render();
-  const ok = await askConfirm({
-    title: '使い切りました',
-    message: `「${item.name}」を買うリストに入れますか?`,
-    ok: '入れる', cancel: '入れない',
-  });
-  if (ok) {
-    addToBuyFrom(item);
-    save(); render();
-    toast(`「${item.name}」を買うリストに入れました`, () => restore(snap));
-  } else {
-    toast(`「${item.name}」を使い切りました`, () => restore(snap));
-  }
+  toast(added ? `「${item.name}」を買うリストに移しました` : `「${item.name}」は買うリストにすでにあるので、こちらから消しました`, () => restore(snap));
 }
 
+// 削除(右スワイプ・ゴミ箱)
 function removeItem(id) {
   const item = byId(id);
   if (!item) return;
@@ -190,10 +183,10 @@ function toggleStaple(id) {
   focusAction(id, 'staple');
 }
 
-function setFrozen(id, on) {
+function toggleFrozen(id) {
   const item = byId(id);
   if (!item) return;
-  if (on) {
+  if (!item.frozen) {
     const m = item.masterId ? MASTER_BY_ID.get(item.masterId) : null;
     item.prev = { storage: item.storage, expiry: item.expiry };
     item.storage = 'freezer';
@@ -217,16 +210,22 @@ const ICON = {
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1L3.2 9.6l6.1-.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
   scan: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7.5 8v8M10.5 8v8M13 8v8M16.5 8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  snow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5v19M3.8 7.25l16.4 9.5M3.8 16.75l16.4-9.5M9.5 4l2.5 2.5L14.5 4M9.5 20l2.5-2.5 2.5 2.5M4.2 10.6l3.4-.9-.9-3.4M19.8 13.4l-3.4.9.9 3.4M4.2 13.4l3.4.9-.9 3.4M19.8 10.6l-3.4-.9.9-3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 let currentView = 'buy';
-let recipeMode = false;
 const recipeSel = new Set();
+
+function sortByExpiry(a, b) {
+  if (!a.expiry && !b.expiry) return a.name.localeCompare(b.name, 'ja');
+  if (!a.expiry) return 1;
+  if (!b.expiry) return -1;
+  return a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : a.name.localeCompare(b.name, 'ja');
+}
 
 function renderBuy() {
   const items = buyItems();
-  const ul = document.getElementById('buy-list');
-  ul.innerHTML = items.map((i) => `
+  document.getElementById('buy-list').innerHTML = items.map((i) => `
     <li class="row">
       <label class="check"><input type="checkbox" data-action="purchase" data-id="${i.id}" aria-label="「${esc(i.name)}」を買った"></label>
       <button type="button" class="name-btn" data-action="edit" data-id="${i.id}" aria-label="${esc(i.name)}を編集">${esc(i.name)}</button>
@@ -236,56 +235,57 @@ function renderBuy() {
   document.getElementById('buy-empty').hidden = items.length > 0;
 }
 
-function sortByExpiry(a, b) {
-  if (!a.expiry && !b.expiry) return a.name.localeCompare(b.name, 'ja');
-  if (!a.expiry) return 1;
-  if (!b.expiry) return -1;
-  return a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : a.name.localeCompare(b.name, 'ja');
-}
-
 function renderHomeItem(i) {
   const s = statusOf(i);
   const m = i.masterId ? MASTER_BY_ID.get(i.masterId) : null;
   const nativeFrozen = i.frozen && !i.prev && m && m.storage === 'freezer';
-  const statusHtml = s.kind === 'unset'
-    ? `<button type="button" class="status status-unset" data-action="edit" data-id="${i.id}">期限未設定</button>`
-    : `<span class="status status-${s.kind}">${esc(s.text)}</span>`;
-  const select = recipeMode
-    ? `<label class="item-select"><input type="checkbox" data-action="select" data-id="${i.id}" ${recipeSel.has(i.id) ? 'checked' : ''} aria-label="「${esc(i.name)}」をレシピに使う"></label>`
-    : '';
+  const staple = i.staple ? `<span class="staple-mark" role="img" aria-label="定番">${ICON.star}</span>` : '';
   return `
-    <li class="item is-${s.kind}">
-      <div class="item-top">
-        ${select}
-        <button type="button" class="name-btn" data-action="edit" data-id="${i.id}" aria-label="${esc(i.name)}、${esc(s.text)}。編集する">${esc(i.name)}</button>
-        ${statusHtml}
-      </div>
-      <div class="item-actions">
-        <button type="button" class="used-btn" data-action="useup" data-id="${i.id}" aria-label="「${esc(i.name)}」を使い切った">使い切り</button>
-        <label class="toggle"><input type="checkbox" data-action="freeze" data-id="${i.id}" ${i.frozen ? 'checked' : ''} ${nativeFrozen ? 'disabled' : ''} aria-label="「${esc(i.name)}」を冷凍した"><span aria-hidden="true">冷凍</span></label>
-        <button type="button" class="toggle toggle-btn" data-action="staple" data-id="${i.id}" aria-pressed="${i.staple}" aria-label="「${esc(i.name)}」を定番にする">${ICON.star}<span aria-hidden="true">定番</span></button>
-        <span class="spacer"></span>
-        <button type="button" class="icon-btn" data-action="delete" data-id="${i.id}" aria-label="「${esc(i.name)}」を削除">${ICON.trash}</button>
+    <li class="item is-${s.kind}" data-id="${i.id}">
+      <div class="swipe-bg swipe-bg-delete" aria-hidden="true">削除</div>
+      <div class="swipe-bg swipe-bg-buy" aria-hidden="true">買うリストへ</div>
+      <div class="item-fg">
+        <button type="button" class="name-btn" data-action="edit" data-id="${i.id}" aria-label="${esc(i.name)}、${esc(s.text)}${i.staple ? '、定番' : ''}${i.frozen ? '、冷凍中' : ''}。編集する">${esc(i.name)}</button>
+        ${staple}
+        <span class="status status-${s.kind}">${esc(s.text)}</span>
+        <button type="button" class="icon-btn freeze-btn" data-action="freeze" data-id="${i.id}" aria-pressed="${!!i.frozen}" ${nativeFrozen ? 'disabled' : ''} aria-label="「${esc(i.name)}」を冷凍した">${ICON.snow}</button>
       </div>
     </li>`;
 }
 
 function renderHome() {
   const items = homeItems();
-  const wrap = document.getElementById('home-groups');
-  wrap.innerHTML = STORAGE_ORDER.map((st) => {
-    const g = items.filter((i) => i.storage === st).sort(sortByExpiry);
+  document.getElementById('home-groups').innerHTML = CATEGORIES.map((c, idx) => {
+    const g = items.filter((i) => (i.category || OTHER) === c).sort(sortByExpiry);
     if (!g.length) return '';
     return `
-      <section class="group group-${st}" aria-labelledby="g-${st}">
-        <h3 class="group-title" id="g-${st}"><span class="group-icon" aria-hidden="true"></span>${STORAGE_LABEL[st]}<span class="count">${g.length}件</span></h3>
+      <section class="group" aria-labelledby="g-${idx}">
+        <h3 class="group-title" id="g-${idx}">${esc(c)}<span class="count">${g.length}件</span></h3>
         <ul class="list">${g.map(renderHomeItem).join('')}</ul>
       </section>`;
   }).join('');
   document.getElementById('home-empty').hidden = items.length > 0;
+  document.getElementById('swipe-hint').hidden = items.length === 0;
+}
 
-  // レシピ選択
-  for (const id of [...recipeSel]) if (!byId(id) || byId(id).list !== 'home') recipeSel.delete(id);
+function renderRecipe() {
+  const items = homeItems().sort(sortByExpiry);
+  for (const id of [...recipeSel]) { const it = byId(id); if (!it || it.list !== 'home') recipeSel.delete(id); }
+  document.getElementById('recipe-list').innerHTML = items.map((i) => {
+    const s = statusOf(i);
+    return `
+      <li class="pick">
+        <label>
+          <input type="checkbox" data-action="select" data-id="${i.id}" ${recipeSel.has(i.id) ? 'checked' : ''}>
+          <span class="pick-name">${esc(i.name)}</span>
+          ${s.kind === 'ok' ? '' : `<span class="status status-${s.kind}">${esc(s.text)}</span>`}
+        </label>
+      </li>`;
+  }).join('');
+  document.getElementById('recipe-empty').hidden = items.length > 0;
+  const showBar = items.length > 0 && currentView === 'recipe';
+  document.getElementById('recipe-bar').hidden = !showBar;
+  document.body.classList.toggle('recipe-open', showBar);
   const make = document.getElementById('recipe-make');
   make.disabled = recipeSel.size === 0;
   make.textContent = recipeSel.size ? `選んだ${recipeSel.size}品でプロンプトを作る` : '食材を選んでください';
@@ -293,21 +293,17 @@ function renderHome() {
 
 function renderCounts() {
   const alerts = homeItems().filter(isAlert).length;
-  const buyN = buyItems().length;
   const h = document.getElementById('tab-count-home');
   h.hidden = alerts === 0;
   h.textContent = alerts;
   h.setAttribute('aria-label', `期限が近い食材${alerts}件`);
-  const b = document.getElementById('tab-count-buy');
-  b.hidden = buyN === 0;
-  b.textContent = buyN;
-  b.setAttribute('aria-label', `${buyN}件`);
   updateAppBadge(alerts);
 }
 
 function render() {
   renderBuy();
   renderHome();
+  renderRecipe();
   renderCounts();
 }
 
@@ -317,16 +313,16 @@ function focusAction(id, action) {
 }
 
 /* ───────── 画面切り替え ───────── */
-function showView(name, { focus = false } = {}) {
+const VIEWS = ['buy', 'home', 'recipe', 'settings'];
+function showView(name) {
   currentView = name;
-  for (const v of ['buy', 'home', 'settings']) document.getElementById(`view-${v}`).hidden = v !== name;
+  for (const v of VIEWS) document.getElementById(`view-${v}`).hidden = v !== name;
   document.querySelectorAll('.tab').forEach((t) => {
     if (t.dataset.view === name) t.setAttribute('aria-current', 'page');
     else t.removeAttribute('aria-current');
   });
-  if (name !== 'home' && recipeMode) setRecipeMode(false);
+  renderRecipe();
   window.scrollTo(0, 0);
-  if (focus) document.getElementById(`h-${name}`).setAttribute('tabindex', '-1'), document.getElementById(`h-${name}`).focus();
 }
 
 /* ───────── 追加フォーム(候補表示つき) ───────── */
@@ -337,7 +333,7 @@ function buildAddForm(slot) {
     <form class="add-form" autocomplete="off">
       <div class="add-input-wrap">
         <label class="visually-hidden" for="${uidp}-input">${list === 'buy' ? '買うリストに追加する食材' : '家にある食材に追加する食材'}</label>
-        <input type="text" id="${uidp}-input" placeholder="食材を追加" enterkeyhint="done"
+        <input type="text" id="${uidp}-input" placeholder="食材名を入力" enterkeyhint="done"
           role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${uidp}-list">
         <ul class="suggest" id="${uidp}-list" role="listbox" aria-label="候補" hidden></ul>
       </div>
@@ -347,6 +343,7 @@ function buildAddForm(slot) {
   const form = slot.querySelector('form');
   const input = form.querySelector('input');
   const lb = form.querySelector('.suggest');
+  const dialog = form.closest('dialog');
   let options = [];
   let active = -1;
   let picked = null;      // 候補から選んだマスタ
@@ -358,7 +355,7 @@ function buildAddForm(slot) {
     if (!options.length) return close();
     lb.innerHTML = options.map((m, idx) => `
       <li role="option" id="${uidp}-opt-${idx}" data-idx="${idx}" aria-selected="false">
-        <span>${esc(m.name)}</span><span class="meta">${STORAGE_LABEL[m.storage]}・${m.days}日</span>
+        <span>${esc(m.name)}</span><span class="meta">${esc(m.category)}・${STORAGE_LABEL[m.storage]}${m.days}日</span>
       </li>`).join('');
     lb.hidden = false;
     input.setAttribute('aria-expanded', 'true');
@@ -382,12 +379,14 @@ function buildAddForm(slot) {
     const name = input.value.trim();
     if (!name) return;
     const masterId = picked && picked.name === name ? picked.id : null;
-    addItem(list, name, { masterId, manualExpiry: fromBarcode });
+    const manualExpiry = fromBarcode;
     input.value = '';
     picked = null;
     fromBarcode = false;
     close();
-    if (!document.querySelector('dialog[open]')) input.focus();
+    if (dialog) dialog.close();
+    addItem(list, name, { masterId, manualExpiry });
+    if (!dialog && !document.querySelector('dialog[open]')) input.focus();
   }
 
   input.addEventListener('input', () => { picked = null; fromBarcode = false; open(); });
@@ -396,7 +395,7 @@ function buildAddForm(slot) {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(active + 1, options.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(active - 1, -1)); }
     else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); choose(active); }
-    else if (e.key === 'Escape') { close(); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
   });
   input.addEventListener('blur', () => setTimeout(close, 150));
   lb.addEventListener('mousedown', (e) => e.preventDefault());
@@ -413,11 +412,23 @@ function buildAddForm(slot) {
       input.focus();
     });
   });
+  return { input, reset: () => { input.value = ''; picked = null; fromBarcode = false; close(); } };
 }
+
+/* ───────── +ボタンの追加ダイアログ ───────── */
+const dlgAdd = document.getElementById('dlg-add');
+let homeAddForm = null;
+document.getElementById('home-add').addEventListener('click', () => {
+  homeAddForm.reset();
+  dlgAdd.showModal();
+  homeAddForm.input.focus();
+});
 
 /* ───────── 編集ダイアログ ───────── */
 const dlgEdit = document.getElementById('dlg-edit');
 let editingId = null;
+document.getElementById('edit-category').innerHTML = CATEGORIES.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+
 function openEdit(id, note) {
   const item = byId(id);
   if (!item) return;
@@ -428,8 +439,9 @@ function openEdit(id, note) {
   noteEl.hidden = !note;
   noteEl.textContent = note || '';
   document.getElementById('edit-name').value = item.name;
-  document.getElementById('edit-storage-wrap').hidden = !isHome;
-  document.getElementById('edit-expiry-wrap').hidden = !isHome;
+  dlgEdit.querySelectorAll('.home-only').forEach((el) => { el.hidden = !isHome; });
+  dlgEdit.querySelectorAll('.buy-only').forEach((el) => { el.hidden = isHome; });
+  document.getElementById('edit-category').value = item.category || OTHER;
   dlgEdit.querySelectorAll('input[name="edit-storage"]').forEach((r) => { r.checked = r.value === item.storage; });
   document.getElementById('edit-expiry').value = item.expiry || '';
   document.getElementById('edit-staple').checked = !!item.staple;
@@ -445,13 +457,16 @@ document.getElementById('edit-form').addEventListener('submit', (e) => {
   if (!item) return dlgEdit.close();
   const name = document.getElementById('edit-name').value.trim();
   if (!name) return;
+  let category = document.getElementById('edit-category').value;
   if (name !== item.name) {
     item.name = name;
     const m = findMasterExact(name);
     item.masterId = m ? m.id : null;
+    // 種類を手で変えていなければ、新しい名前に合わせる
+    if (m && category === item.category) category = m.category;
   }
-  item.staple = document.getElementById('edit-staple').checked;
   if (item.list === 'home') {
+    item.category = category;
     const st = (dlgEdit.querySelector('input[name="edit-storage"]:checked') || {}).value || item.storage;
     if (st !== item.storage) {
       item.storage = st;
@@ -459,11 +474,15 @@ document.getElementById('edit-form').addEventListener('submit', (e) => {
       item.prev = null;
     }
     item.expiry = document.getElementById('edit-expiry').value || null;
+  } else {
+    item.staple = document.getElementById('edit-staple').checked;
   }
   save(); render();
   dlgEdit.close();
   announce(`「${item.name}」を保存しました`);
 });
+document.getElementById('edit-to-buy').addEventListener('click', () => { const id = editingId; dlgEdit.close(); moveToBuy(id); });
+document.getElementById('edit-delete').addEventListener('click', () => { const id = editingId; dlgEdit.close(); removeItem(id); });
 
 /* ───────── 確認ダイアログ ───────── */
 function askConfirm({ title, message, ok, cancel }) {
@@ -487,6 +506,66 @@ function askConfirm({ title, message, ok, cancel }) {
 
 // data-close ボタン共通
 document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
+
+/* ───────── スワイプ(家にある食材のカード) ───────── */
+// 左にスワイプ → 買うリストへ / 右にスワイプ → 削除
+// タップで開く編集画面にも同じ操作のボタンがある(スワイプできない人向けの代わり)
+let swipe = null;
+let suppressClickUntil = 0;
+const homeGroups = document.getElementById('home-groups');
+
+homeGroups.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  const fg = e.target.closest('.item-fg');
+  if (!fg || e.target.closest('.freeze-btn')) return;
+  const li = fg.closest('.item');
+  swipe = { li, fg, id: li.dataset.id, x0: e.clientX, y0: e.clientY, dx: 0, lock: null, pid: e.pointerId, w: li.offsetWidth };
+});
+homeGroups.addEventListener('pointermove', (e) => {
+  if (!swipe || e.pointerId !== swipe.pid) return;
+  const dx = e.clientX - swipe.x0;
+  const dy = e.clientY - swipe.y0;
+  if (!swipe.lock) {
+    if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+      swipe.lock = 'x';
+      try { swipe.fg.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+    } else if (Math.abs(dy) > 10) {
+      swipe = null;
+      return;
+    } else return;
+  }
+  swipe.dx = dx;
+  swipe.fg.classList.remove('snap');
+  swipe.fg.style.transform = `translateX(${dx}px)`;
+  swipe.li.dataset.dir = dx < 0 ? 'left' : 'right';
+  swipe.li.classList.toggle('armed', Math.abs(dx) > threshold(swipe.w));
+});
+function threshold(w) { return Math.min(110, w * 0.3); }
+function endSwipe(e, cancelled) {
+  if (!swipe || (e && e.pointerId !== swipe.pid)) return;
+  const s = swipe;
+  swipe = null;
+  if (s.lock !== 'x') return;
+  suppressClickUntil = Date.now() + 400;
+  const commit = !cancelled && Math.abs(s.dx) > threshold(s.w);
+  s.fg.classList.add('snap');
+  if (!commit) {
+    s.fg.style.transform = '';
+    s.li.classList.remove('armed');
+    setTimeout(() => { delete s.li.dataset.dir; }, 200);
+    return;
+  }
+  const toLeft = s.dx < 0;
+  s.fg.style.transform = `translateX(${toLeft ? -s.w : s.w}px)`;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  setTimeout(() => { if (toLeft) moveToBuy(s.id); else removeItem(s.id); }, reduce ? 0 : 180);
+}
+homeGroups.addEventListener('pointerup', (e) => endSwipe(e, false));
+homeGroups.addEventListener('pointercancel', (e) => endSwipe(e, true));
+// スワイプ直後のタップ判定を無視する
+document.addEventListener('click', (e) => {
+  if (Date.now() < suppressClickUntil && e.target.closest('#home-groups')) { e.stopPropagation(); e.preventDefault(); }
+}, true);
 
 /* ───────── バーコード ───────── */
 const dlgScan = document.getElementById('dlg-scan');
@@ -572,17 +651,6 @@ document.getElementById('scan-manual').addEventListener('submit', (e) => {
 });
 
 /* ───────── レシピ ───────── */
-function setRecipeMode(on) {
-  recipeMode = on;
-  if (!on) recipeSel.clear();
-  const btn = document.getElementById('recipe-toggle');
-  btn.setAttribute('aria-pressed', String(on));
-  btn.textContent = on ? '選ぶのをやめる' : 'レシピを考える';
-  document.getElementById('recipe-hint').hidden = !on;
-  document.getElementById('recipe-bar').hidden = !on;
-  document.body.classList.toggle('recipe-mode', on);
-  renderHome();
-}
 function buildPrompt(items) {
   const lines = items.sort(sortByExpiry).map((i) => {
     const s = statusOf(i);
@@ -602,7 +670,6 @@ function buildPrompt(items) {
     '- 各レシピに、材料と分量(2人分)、手順、調理時間を書く',
   ].join('\n');
 }
-document.getElementById('recipe-toggle').addEventListener('click', () => setRecipeMode(!recipeMode));
 document.getElementById('recipe-make').addEventListener('click', () => {
   const items = [...recipeSel].map(byId).filter(Boolean);
   if (!items.length) return;
@@ -687,6 +754,7 @@ document.getElementById('backup-import').addEventListener('change', async (e) =>
       ok: '置き換える', cancel: 'やめる',
     });
     if (!ok) return;
+    data.items.forEach((i) => { if (!i.category || !CATEGORIES.includes(i.category)) i.category = categoryFor(i); });
     state.items = data.items;
     save(); render();
     toast('バックアップを読み込みました');
@@ -699,7 +767,7 @@ document.getElementById('backup-import').addEventListener('change', async (e) =>
 function renderMasterTable() {
   document.getElementById('master-count').textContent = MASTER.length;
   document.getElementById('master-body').innerHTML = MASTER.map((m) =>
-    `<tr><td>${esc(m.name)}</td><td>${STORAGE_LABEL[m.storage]}</td><td>${m.days}日</td><td>${m.storage === 'freezer' ? '—' : (m.freezerDays ? m.freezerDays + '日' : '—')}</td></tr>`).join('');
+    `<tr><td>${esc(m.name)}</td><td>${esc(m.category)}</td><td>${STORAGE_LABEL[m.storage]}</td><td>${m.days}日</td><td>${m.storage === 'freezer' ? '—' : (m.freezerDays ? m.freezerDays + '日' : '—')}</td></tr>`).join('');
 }
 
 /* ───────── トースト・読み上げ ───────── */
@@ -718,7 +786,6 @@ function toast(msg, undo) {
   toastTimer = setTimeout(() => { region.innerHTML = ''; }, undo ? 7000 : 4000);
 }
 function announce(msg) {
-  // 視覚的なトーストを出さずに読み上げだけしたいとき
   let live = document.getElementById('sr-live');
   if (!live) {
     live = document.createElement('div');
@@ -740,7 +807,7 @@ document.getElementById('main').addEventListener('click', (e) => {
     case 'edit': openEdit(id); break;
     case 'staple': toggleStaple(id); break;
     case 'delete': removeItem(id); break;
-    case 'useup': useUp(id); break;
+    case 'freeze': toggleFrozen(id); break;
   }
 });
 document.getElementById('main').addEventListener('change', (e) => {
@@ -749,10 +816,9 @@ document.getElementById('main').addEventListener('change', (e) => {
   const id = el.dataset.id;
   switch (el.dataset.action) {
     case 'purchase': if (el.checked) purchase(id); break;
-    case 'freeze': setFrozen(id, el.checked); break;
     case 'select':
       if (el.checked) recipeSel.add(id); else recipeSel.delete(id);
-      renderHome();
+      renderRecipe();
       focusAction(id, 'select');
       break;
   }
@@ -763,7 +829,10 @@ document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () 
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); renderBadgeSettings(); } });
 
 /* ───────── 起動 ───────── */
-document.querySelectorAll('.add-slot').forEach(buildAddForm);
+document.querySelectorAll('.add-slot').forEach((slot) => {
+  const f = buildAddForm(slot);
+  if (slot.dataset.list === 'home') homeAddForm = f;
+});
 renderMasterTable();
 renderBadgeSettings();
 render();
