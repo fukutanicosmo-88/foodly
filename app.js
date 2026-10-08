@@ -25,6 +25,30 @@ const MASTER = FOOD_GROUPS.flatMap(([category, rows]) => rows.map(([name, yomi, 
 })));
 const MASTER_BY_ID = new Map(MASTER.map((m) => [m.id, m]));
 
+/* 覚えた食材(マスタにない食材を、使いながら自動で覚える) */
+const LEARN_PREFIX = 'my:';
+function rebuildLearned() {
+  for (let i = MASTER.length - 1; i >= 0; i--) {
+    if (MASTER[i].learned) { MASTER_BY_ID.delete(MASTER[i].id); MASTER.splice(i, 1); }
+  }
+  for (const [k, v] of Object.entries(state.learned || {})) {
+    const m = {
+      id: LEARN_PREFIX + k, name: v.name, yomi: '', category: v.category || OTHER,
+      storage: v.storage || 'fridge', days: v.days, freezerDays: null, keys: [k], learned: true,
+    };
+    MASTER.push(m);
+    MASTER_BY_ID.set(m.id, m);
+  }
+}
+function findBuiltin(name) {
+  const n = norm(name);
+  return MASTER.find((m) => !m.learned && m.keys.includes(n)) || null;
+}
+function findLearned(name) {
+  const m = MASTER_BY_ID.get(LEARN_PREFIX + norm(name));
+  return m || null;
+}
+
 function findMasterExact(name) {
   const n = norm(name);
   if (!n) return null;
@@ -78,13 +102,40 @@ function load() {
         d.items.forEach((i) => { if (!i.category || !CATEGORIES.includes(i.category)) i.category = categoryFor(i); });
         d.settings = { ...DEFAULT_SETTINGS, ...(d.settings || {}) };
         if (!['expiry', 'category'].includes(d.settings.homeSort)) d.settings.homeSort = 'expiry';
+        d.learned = d.learned || {};
         return d;
       }
     }
   } catch (e) { /* 読めない場合は空で始める */ }
-  return { version: 1, items: [], settings: { ...DEFAULT_SETTINGS } };
+  return { version: 1, items: [], settings: { ...DEFAULT_SETTINGS }, learned: {} };
 }
 let state = load();
+rebuildLearned();
+
+function diffDays(from, to) {
+  const a = parse(from), b = parse(to);
+  return Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 864e5);
+}
+// マスタにない食材の期限・種類・保存場所を覚える。初めて覚えたときは true を返す
+function learnFrom(item) {
+  if (item.list !== 'home') return false;
+  if (findBuiltin(item.name)) return false; // マスタにある食材は覚えない
+  const k = norm(item.name);
+  if (!k) return false;
+  const prev = state.learned[k];
+  let days = prev ? prev.days : null;
+  // 冷凍中の期限は冷凍の日数なので、冷蔵・常温の日数としては覚えない
+  if (!item.frozen && item.expiry && item.movedAt) {
+    const d = diffDays(item.movedAt, item.expiry);
+    if (d > 0) days = d;
+  }
+  if (!days) return false;
+  const storage = item.frozen ? ((item.prev && item.prev.storage) || (prev && prev.storage) || 'fridge') : item.storage;
+  state.learned[k] = { name: item.name, category: item.category || OTHER, storage, days };
+  item.masterId = LEARN_PREFIX + k;
+  rebuildLearned();
+  return !prev;
+}
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
   catch (e) { toast('保存できませんでした。空き容量を確認してください。'); }
@@ -115,7 +166,8 @@ function arriveHome(item) {
 }
 
 function addItem(list, name, { masterId = null, manualExpiry = false } = {}) {
-  const m = manualExpiry ? null : (masterId ? MASTER_BY_ID.get(masterId) : findMasterExact(name));
+  // バーコードで追加した商品は、覚えた食材だけ照合する(一般的な食材名と取り違えないように)
+  const m = manualExpiry ? findLearned(name) : (masterId ? MASTER_BY_ID.get(masterId) : findMasterExact(name));
   const item = {
     id: uid(), name, list, staple: false,
     masterId: m ? m.id : null,
@@ -158,15 +210,37 @@ function addToBuyFrom(item) {
   return true;
 }
 
-// 家にある食材 → 買うリスト(左スワイプ)
-function moveToBuy(id) {
+// 使い切った(左スワイプ・詳細のボタン)
+// 同じ食材がまだ残っていれば消すだけ。最後の1つなら、定番は自動で買うリストへ、それ以外は「また買う?」と聞く
+async function useUp(id) {
   const item = byId(id);
   if (!item) return;
   const snap = snapshot();
+  const others = homeItems().filter((i) => i.id !== id && norm(i.name) === norm(item.name));
   state.items = state.items.filter((i) => i.id !== id);
-  const added = addToBuyFrom(item);
   save(); render();
-  toast(added ? `「${item.name}」を買うリストに移しました` : `「${item.name}」は買うリストにすでにあるので、こちらから消しました`, () => restore(snap));
+  if (others.length) {
+    toast(`「${item.name}」を1つ使い切りました(残り${others.length})`, () => restore(snap));
+    return;
+  }
+  if (item.staple) {
+    const added = addToBuyFrom(item);
+    save(); render();
+    toast(added ? `「${item.name}」を使い切りました。定番なので買うリストに入れました` : `「${item.name}」を使い切りました(買うリストにすでにあります)`, () => restore(snap));
+    return;
+  }
+  const again = await askConfirm({
+    title: '使い切りました',
+    message: `「${item.name}」をまた買いますか?`,
+    ok: 'また買う', cancel: '買わない',
+  });
+  if (again) {
+    const added = addToBuyFrom(item);
+    save(); render();
+    toast(added ? `「${item.name}」を買うリストに入れました` : `「${item.name}」は買うリストにすでにあります`, () => restore(snap));
+  } else {
+    toast(`「${item.name}」を使い切りました`, () => restore(snap));
+  }
 }
 
 // 削除(右スワイプ・ゴミ箱)
@@ -259,7 +333,7 @@ function renderHomeItem(i) {
   return `
     <li class="item is-${s.kind}" data-id="${i.id}">
       <div class="swipe-bg swipe-bg-delete" aria-hidden="true">削除</div>
-      <div class="swipe-bg swipe-bg-buy" aria-hidden="true">買うリストへ</div>
+      <div class="swipe-bg swipe-bg-buy" aria-hidden="true">使い切った</div>
       <div class="item-fg">
         <button type="button" class="name-btn" data-action="edit" data-id="${i.id}" aria-label="${esc(i.name)}${s.kind === 'unset' ? '' : '、' + esc(s.text)}${i.staple ? '、定番' : ''}${i.frozen ? '、冷凍中' : ''}。編集する">${esc(i.name)}</button>
         <span class="item-right">
@@ -560,7 +634,13 @@ document.getElementById('edit-form').addEventListener('submit', (e) => {
   }
   save(); render();
   dlgEdit.close();
-  announce(`「${item.name}」を保存しました`);
+  if (learnFrom(item)) {
+    save(); renderLearned();
+    toast(`「${item.name}」の期限(${state.learned[norm(item.name)].days}日)を覚えました。次から自動で入ります`);
+  } else {
+    if (item.list === 'home' && item.masterId && item.masterId.startsWith(LEARN_PREFIX)) { save(); renderLearned(); }
+    announce(`「${item.name}」を保存しました`);
+  }
 });
 function editMove(delta) {
   const idx = buyItems().findIndex((b) => b.id === editingId);
@@ -575,7 +655,7 @@ function updateEditMoveButtons() {
 }
 document.getElementById('edit-up').addEventListener('click', () => editMove(-1));
 document.getElementById('edit-down').addEventListener('click', () => editMove(1));
-document.getElementById('edit-to-buy').addEventListener('click', () => { const id = editingId; dlgEdit.close(); moveToBuy(id); });
+document.getElementById('edit-to-buy').addEventListener('click', () => { const id = editingId; dlgEdit.close(); useUp(id); });
 document.getElementById('edit-delete').addEventListener('click', () => { const id = editingId; dlgEdit.close(); removeItem(id); });
 
 /* ───────── 確認ダイアログ ───────── */
@@ -659,7 +739,7 @@ function endSwipe(e, cancelled) {
   const toLeft = s.dx < 0;
   s.fg.style.transform = `translateX(${toLeft ? -s.w : s.w}px)`;
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  setTimeout(() => { if (toLeft) moveToBuy(s.id); else removeItem(s.id); }, reduce ? 0 : 180);
+  setTimeout(() => { if (toLeft) useUp(s.id); else removeItem(s.id); }, reduce ? 0 : 180);
 }
 homeGroups.addEventListener('pointerup', (e) => endSwipe(e, false));
 homeGroups.addEventListener('pointercancel', (e) => endSwipe(e, true));
@@ -910,7 +990,7 @@ document.getElementById('badge-toggle').addEventListener('change', async (e) => 
 
 /* ───────── バックアップ ───────── */
 document.getElementById('backup-export').addEventListener('click', async () => {
-  const json = JSON.stringify({ app: 'foodly', version: 1, exportedAt: new Date().toISOString(), items: state.items }, null, 2);
+  const json = JSON.stringify({ app: 'foodly', version: 1, exportedAt: new Date().toISOString(), items: state.items, learned: state.learned, settings: state.settings }, null, 2);
   const filename = `foodly-backup-${todayStr()}.json`;
   const file = new File([json], filename, { type: 'application/json' });
   try {
@@ -943,6 +1023,9 @@ document.getElementById('backup-import').addEventListener('change', async (e) =>
     if (!ok) return;
     data.items.forEach((i) => { if (!i.category || !CATEGORIES.includes(i.category)) i.category = categoryFor(i); });
     state.items = data.items;
+    if (data.learned && typeof data.learned === 'object') state.learned = data.learned;
+    if (data.settings) state.settings = { ...DEFAULT_SETTINGS, ...data.settings };
+    rebuildLearned(); renderLearned();
     save(); render();
     toast('バックアップを読み込みました');
   } catch (err) {
@@ -952,10 +1035,34 @@ document.getElementById('backup-import').addEventListener('change', async (e) =>
 
 /* ───────── マスタ一覧 ───────── */
 function renderMasterTable() {
-  document.getElementById('master-count').textContent = MASTER.length;
-  document.getElementById('master-body').innerHTML = MASTER.map((m) =>
+  const builtin = MASTER.filter((m) => !m.learned);
+  document.getElementById('master-count').textContent = builtin.length;
+  document.getElementById('master-body').innerHTML = builtin.map((m) =>
     `<tr><td>${esc(m.name)}</td><td>${esc(m.category)}</td><td>${STORAGE_LABEL[m.storage]}</td><td>${m.days}日</td><td>${m.storage === 'freezer' ? '—' : (m.freezerDays ? m.freezerDays + '日' : '—')}</td></tr>`).join('');
 }
+
+/* ───────── 覚えた食材の一覧 ───────── */
+function renderLearned() {
+  const entries = Object.entries(state.learned || {}).sort((a, b) => a[1].name.localeCompare(b[1].name, 'ja'));
+  document.getElementById('learned-count').textContent = entries.length;
+  document.getElementById('learned-empty').hidden = entries.length > 0;
+  document.getElementById('learned-list').innerHTML = entries.map(([k, v]) => `
+    <li class="learned-row">
+      <span class="learned-name">${esc(v.name)}</span>
+      <span class="learned-meta">${esc(v.category)}・${STORAGE_LABEL[v.storage] || '冷蔵'}・${v.days}日</span>
+      <button type="button" class="icon-btn" data-forget="${esc(k)}" aria-label="「${esc(v.name)}」を忘れる">${ICON.trash}</button>
+    </li>`).join('');
+}
+document.getElementById('learned-list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-forget]');
+  if (!b) return;
+  const k = b.dataset.forget;
+  const before = JSON.stringify(state.learned);
+  const name = state.learned[k] && state.learned[k].name;
+  delete state.learned[k];
+  rebuildLearned(); save(); renderLearned();
+  toast(`「${name}」を忘れました`, () => { state.learned = JSON.parse(before); rebuildLearned(); save(); renderLearned(); });
+});
 
 /* ───────── トースト・読み上げ ───────── */
 let toastTimer = null;
@@ -1020,6 +1127,7 @@ document.querySelectorAll('.add-slot').forEach((slot) => {
   if (slot.dataset.list === 'home') homeAddForm = f;
 });
 renderMasterTable();
+renderLearned();
 renderBadgeSettings();
 render();
 if (homeItems().some(isAlert)) showView('home');

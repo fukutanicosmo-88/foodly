@@ -46,7 +46,7 @@
           <label><input type="radio" name="home-sort" value="category"><span>種類別</span></label>
         </fieldset>
       </div>
-      <p class="hint" id="swipe-hint">左にスワイプで買うリストへ、右にスワイプで削除。タップで編集できます。</p>
+      <p class="hint" id="swipe-hint">左にスワイプで「使い切った」、右にスワイプで削除。タップで詳細を開きます。</p>
       <div id="home-groups"></div>
       <p id="home-empty" class="empty" hidden>家にある食材はまだありません。買うリストでチェックを入れるか、右上の+から追加できます。</p>
     </section>
@@ -111,6 +111,13 @@
       </div>
 
       <div class="card">
+        <h3 class="card-title">覚えた食材(<span id="learned-count">0</span>件)</h3>
+        <p>マスタにない食材に期限を入れると、その日数・種類・保存場所を覚えて、次から自動で入れます。間違って覚えたものは削除できます。</p>
+        <p id="learned-empty" class="hint">まだありません。</p>
+        <ul id="learned-list" class="learned-list"></ul>
+      </div>
+
+      <div class="card">
         <h3 class="card-title">食材マスタ</h3>
         <p>食材名を選ぶと、ここにある日数で消費期限を自動で計算します。日数は目安です。</p>
         <details class="master">
@@ -125,7 +132,7 @@
         </details>
       </div>
 
-      <p class="hint center">foodly v1.4</p>
+      <p class="hint center">foodly v1.5</p>
     </section>
   </main>
 
@@ -212,7 +219,7 @@
         <span>定番(いつも買うものの目印)</span>
       </label>
       <div class="move-actions home-only">
-        <button type="button" class="btn btn-secondary" id="edit-to-buy">買うリストへ</button>
+        <button type="button" class="btn btn-secondary" id="edit-to-buy">使い切った</button>
         <button type="button" class="btn btn-danger" id="edit-delete">削除</button>
       </div>
       <div class="dlg-actions">

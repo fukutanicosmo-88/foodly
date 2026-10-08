@@ -1,5 +1,5 @@
 // foodly service worker — アプリ本体をキャッシュしてオフラインでも開けるようにする
-const VERSION = 'foodly-v1.4.0';
+const VERSION = 'foodly-v1.5.0';
 const SHELL = [
   './',
   './index.html',
